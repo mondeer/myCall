@@ -1,6 +1,6 @@
 package ke.co.afrobay.mycall;
 
-import java.sql.Date;
+import java.util.Date;
 import java.text.SimpleDateFormat;
 import android.Manifest;
 import android.content.pm.PackageManager;
@@ -40,6 +40,18 @@ public class MainActivity extends Activity {
     boolean mum_first = false;
     boolean dad_first = false;
 
+    private static int lastState = TelephonyManager.CALL_STATE_IDLE;
+    private static Date callStartTime;
+    private static boolean isIncoming;
+    private static String savedNumber;
+
+    protected void onIncomingCallStarted(Context ctx, String number, Date start){}
+    protected void onOutgoingCallStarted(Context ctx, String number, Date start){}
+    protected void onIncomingCallEnded(Context ctx, String number, Date start, Date end){}
+    protected void onOutgoingCallEnded(Context ctx, String number, Date start, Date end){}
+    protected void onMissedCall(Context ctx, String number, Date start){}
+
+
     // add PhoneStateListener for monitoring
 
     private GoogleApiClient client;
@@ -68,21 +80,25 @@ public class MainActivity extends Activity {
                 //callSequence3();
                 //get the duration of the last call and convert it into an int
                 int duration = Integer.parseInt(getLastOutgoingCallDuration());
+
+
+
+
                 //check to see if the call did not connect by seeing if the duration is zero
 
 
-                public void on
-                   if ((duration == 0) && (TelephonyManager.CALL_STATE_IDLE == 0)) {
-                       sequence1 = callSequenceRecursive(2);
-                       if (sequence1 == 0) {
-                           Toast.makeText(getApplicationContext(), "first sequence DONE ...",
-                                   Toast.LENGTH_LONG).show();
-                           //callSequence2();
-                           //if callSequenceRecursive returns 0 then no body picked the call throughout the sequence
-                           //call the  sendBluetoothSignal()
-                       }
 
-               }
+//                   if ((duration == 0) && (TelephonyManager.CALL_STATE_IDLE == 0)) {
+//                       sequence1 = callSequenceRecursive(2);
+//                       if (sequence1 == 0) {
+//                           Toast.makeText(getApplicationContext(), "first sequence DONE ...",
+//                                   Toast.LENGTH_LONG).show();
+//                           //callSequence2();
+//                           //if callSequenceRecursive returns 0 then no body picked the call throughout the sequence
+//                           //call the  sendBluetoothSignal()
+//                       }
+//
+//               }
             }
         });
         //call mum if mum's picture is clicked
@@ -306,29 +322,69 @@ public class MainActivity extends Activity {
     }
 
     private class TeleListener extends PhoneStateListener {
-        public void onCallStateChanged(int state, String incomingNumber) {
-            super.onCallStateChanged(state, incomingNumber);
-            switch (state) {
-                case TelephonyManager.CALL_STATE_IDLE:
-                    // CALL_STATE_IDLE;
-                    Toast.makeText(getApplicationContext(), "CALL_STATE_IDLE",
-                            Toast.LENGTH_LONG).show();
-                    break;
-                case TelephonyManager.CALL_STATE_OFFHOOK:
-                    // CALL_STATE_OFFHOOK;
-                    Toast.makeText(getApplicationContext(), "CALL_STATE_OFFHOOK",
-                            Toast.LENGTH_LONG).show();
-                    break;
-                case TelephonyManager.CALL_STATE_RINGING:
-                    // CALL_STATE_RINGING
-                    Toast.makeText(getApplicationContext(), incomingNumber,
-                            Toast.LENGTH_LONG).show();
-                    Toast.makeText(getApplicationContext(), "CALL_STATE_RINGING",
-                            Toast.LENGTH_LONG).show();
-                    break;
-                default:
-                    break;
+
+        public void onReceive(Context context, Intent intent) {
+
+            //We listen to two intents.  The new outgoing call only tells us of an outgoing call.  We use it to get the number.
+            if (intent.getAction().equals("android.intent.action.NEW_OUTGOING_CALL")) {
+                savedNumber = intent.getExtras().getString("android.intent.extra.PHONE_NUMBER");
+            }
+            else{
+                String stateStr = intent.getExtras().getString(TelephonyManager.EXTRA_STATE);
+                String number = intent.getExtras().getString(TelephonyManager.EXTRA_INCOMING_NUMBER);
+                int state = 0;
+                if(stateStr.equals(TelephonyManager.EXTRA_STATE_IDLE)){
+                    state = TelephonyManager.CALL_STATE_IDLE;
+                }
+                else if(stateStr.equals(TelephonyManager.EXTRA_STATE_OFFHOOK)){
+                    state = TelephonyManager.CALL_STATE_OFFHOOK;
+                }
+                else if(stateStr.equals(TelephonyManager.EXTRA_STATE_RINGING)){
+                    state = TelephonyManager.CALL_STATE_RINGING;
+                }
+
+
+                onCallStateChanged(context, state, number);
+            }
+        }
+
+
+        public void onCallStateChanged(Context context, int state, String number) {
+                if(lastState == state){
+                    //No change, debounce extras
+                    return;
+                }
+                switch (state) {
+                    case TelephonyManager.CALL_STATE_RINGING:
+                        isIncoming = true;
+                        callStartTime = new Date();
+                        savedNumber = number;
+                        onIncomingCallStarted(context, number, callStartTime);
+                        break;
+                    case TelephonyManager.CALL_STATE_OFFHOOK:
+                        //Transition of ringing->offhook are pickups of incoming calls.  Nothing done on them
+                        if(lastState != TelephonyManager.CALL_STATE_RINGING){
+                            isIncoming = false;
+                            callStartTime = new Date();
+                            onOutgoingCallStarted(context, savedNumber, callStartTime);
+                        }
+                        break;
+                    case TelephonyManager.CALL_STATE_IDLE:
+                        //Went to idle-  this is the end of a call.  What type depends on previous state(s)
+                        if(lastState == TelephonyManager.CALL_STATE_RINGING){
+                            //Ring but no pickup-  a miss
+                            onMissedCall(context, savedNumber, callStartTime);
+                        }
+                        else if(isIncoming){
+                            onIncomingCallEnded(context, savedNumber, callStartTime, new Date());
+                        }
+                        else{
+                            onOutgoingCallEnded(context, savedNumber, callStartTime, new Date());
+                        }
+                        break;
+                }
+                lastState = state;
             }
         }
     }
-}//end MainActivity Class
+//end MainActivity Class
